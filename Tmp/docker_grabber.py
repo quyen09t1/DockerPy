@@ -67,11 +67,11 @@ class Plugin():
             return self.stats
         
         if self.input_method == 'local':
-#             try:
-#                 self.stats['version'] = self.docker_client.version()
-#             except Exception as e:
-#                 print "Cannot get Docker version"
-#                 return self.stats
+            try:
+                self.stats['version'] = self.docker_client.version()
+            except Exception as e:
+                print "Cannot get Docker version"
+                return self.stats
             
             try:
                 self.stats['containers'] = self.docker_client.containers() or []
@@ -97,6 +97,10 @@ class Plugin():
                 container['name'] = container['Names'][0][1:]
                 
                 container['cpu'] = self.get_docker_cpu(container['Id'], self.thread_list[container['Id']].stats)
+                container['memory'] = self.get_docker_memory(container['Id'], self.thread_list[container['Id']].stats)
+                container['network'] = self.get_docker_network(container['Id'], self.thread_list[container['Id']].stats)
+                container['io'] = self.get_docker_io(container['Id'], self.thread_list[container['Id']].stats)
+                
         elif self.input_method == 'snmp':
             pass
         
@@ -133,6 +137,90 @@ class Plugin():
                 self.cpu_old[container_id] = cpu_new    
         return ret
     
+    def get_docker_memory(self, container_id, all_stats):
+        ret = {}
+        try:
+            ret['rss'] = all_stats['memory_stats']['stats']['rss']
+            ret['cache'] = all_stats['memory_stats']['stats']['cache']
+            ret['usage'] = all_stats['memory_stats']['usage']
+            ret['max_usage'] = all_stats['memory_stats']['max_usage']
+        except KeyError as e:
+            print ("Cannot grab MEM usage for container {0} ({1})".format(container_id, e))
+            
+        return ret
+    
+    def get_docker_network(self, container_id, all_stats):
+        network_new = {}
+        
+        try:
+            netcounters = all_stats['network']
+        except KeyError as e:
+            print ("Cannot grab NET usage for container {0} ({1})".format(container_id, e))
+            
+        return network_new
+    
+        if not hasattr(self, 'inetcounters_old'):
+            self.netcounters_old = {}
+            try:
+                self.netcounters_old[container_id] = netcounters
+            except (IOError, UnboundLocalError):
+                pass
+            
+        if container_id not in self.netcounters_old:
+            try:
+                self.netcounters_old[container_id] = netcounters
+            except (IOError, UnboundLocalError):
+                pass
+        else:
+#             network_new['time_since_update'] = getTimeSinceLastUpdate("docker_net_{0}".format(container_id))
+            network_new['rx'] = netcounters['rx_bytes'] - self.netcounters_old[container_id]['rx_bytes']
+            network_new['tx'] = netcounters['tx_bytes'] - self.netcounters_old[container_id]['tx_bytes']
+            network_new['cumulative_rx'] = netcounters['rx_bytes']
+            network_new['cumulative_tx'] = netcounters['tx_bytes']
+            
+            self.netcounters_old[container_id] = netcounters
+        
+        return network_new
+    
+    def get_docker_io(self, container_id, all_stats):
+        
+        io_new = {}
+        
+        try:
+            iocounters = all_stats['blkio_stats']
+        except KeyError as e:
+            print ("Cannot grab block IO usage for container {0} ({1})".format(container_id, e))
+            return io_new
+         
+        if not hasattr(self, 'iocounters_old'):
+            self.iocounters_old = {}
+            try:
+                self.iocounters_old[container_id] = iocounters
+            except (IOError, UnboundLocalError):
+                pass
+            
+        if container_id not in self.iocounters_old:
+            try:
+                self.iocounters_old[container_id] = iocounters
+            except (IOError, UnboundLocalError):
+                pass
+        else:
+            try:
+                ior = [i for i in iocounters['io_service_bytes_recursive'] if i['op'] == 'Read'][0]['value']
+                iow = [i for i in iocounters['io_service_bytes_recursive'] if i['op'] == 'Write'][0]['value']
+                ior_old = [i for i in self.iocounters_old[container_id]['io_service_bytes_recursive'] if i['op'] == 'Read'][0]['value']
+                iow_old = [i for i in self.iocounters_old[container_id]['io_service_bytes_recursive'] if i['op'] == 'Write'][0]['value'] 
+            except (IndexError, KeyError) as e:
+                print ("Cannot grab block IO usage for container {0} ({1})".format(container_id, e))
+            else:
+                io_new['ior'] = ior - ior_old
+                io_new['iow'] = iow - iow_old
+                io_new['cumulative_ior'] = ior
+                io_new['cumulative_iow'] = iow
+                
+                self.iocounters_old[container_id] = iocounters
+                
+        return io_new       
         
 class ThreadDockerGrabber(threading.Thread):
     def __init__(self, docker_client, container_id):
@@ -143,20 +231,24 @@ class ThreadDockerGrabber(threading.Thread):
         
         self._container_id = container_id
         self._stats_stream = docker_client.stats(container_id, decode=True)
-        print self._stats_stream
+        
         self._stats = {}
+        self._notSet = True
         
     def run(self):
-        print "run"
+       
         for i in self._stats_stream:
             self._stats = i
+            self._notSet = False
             time.sleep(0.1)
             if self.stopped():
                 break
             
     @property
     def stats(self):
-        time.sleep(1)
+        
+        while self._notSet:
+            pass 
         return self._stats
     
     @stats.setter
