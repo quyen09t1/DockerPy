@@ -96,10 +96,11 @@ class Plugin():
                 container['key'] = self.get_key()
                 container['name'] = container['Names'][0][1:]
                 
-                container['cpu'] = self.get_docker_cpu(container['Id'], self.thread_list[container['Id']].stats)
                 container['memory'] = self.get_docker_memory(container['Id'], self.thread_list[container['Id']].stats)
                 container['network'] = self.get_docker_network(container['Id'], self.thread_list[container['Id']].stats)
                 container['io'] = self.get_docker_io(container['Id'], self.thread_list[container['Id']].stats)
+                container['cpu'] = self.get_docker_cpu(container['Id'], self.thread_list[container['Id']].stats)
+                
                 
         elif self.input_method == 'snmp':
             pass
@@ -133,7 +134,7 @@ class Plugin():
                 cpu_delta = float(cpu_new['total'] - self.cpu_old[container_id]['total'])
                 system_delta = float(cpu_new['system'] - self.cpu_old[container_id]['system'])
                 if cpu_delta > 0.0 and system_delta > 0.0:
-                    ret['total'] = (cpu_delta / system_delta) * float(cpu_new['nbcore']) * 100
+                    ret['total'] = (cpu_delta / system_delta) * float(cpu_new['nb_core']) * 100
                 self.cpu_old[container_id] = cpu_new    
         return ret
     
